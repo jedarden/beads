@@ -319,6 +319,94 @@ var labelListAllCmd = &cobra.Command{
 	},
 }
 
+var labelRenameCmd = &cobra.Command{
+	Use:   "rename <OLD_NAME> <NEW_NAME>",
+	Short: "Rename a label across all issues",
+	Args:  cobra.ExactArgs(2),
+	Run: func(cmd *cobra.Command, args []string) {
+		CheckReadonly("label rename")
+		ctx := rootCtx
+
+		oldLabel := args[0]
+		newLabel := args[1]
+
+		// Validate labels
+		if oldLabel == "" {
+			FatalErrorRespectJSON("old label name cannot be empty")
+		}
+		if newLabel == "" {
+			FatalErrorRespectJSON("new label name cannot be empty")
+		}
+		if oldLabel == newLabel {
+			FatalErrorRespectJSON("old and new label names are the same")
+		}
+
+		// Check for reserved label namespaces
+		if strings.HasPrefix(newLabel, "provides:") {
+			FatalErrorRespectJSON("'provides:' labels are reserved for cross-project capabilities")
+		}
+
+		var affectedIssues []*types.Issue
+		var err error
+
+		if daemonClient != nil {
+			// Daemon mode: use RPC
+			renameArgs := &rpc.LabelRenameArgs{
+				OldLabel: oldLabel,
+				NewLabel: newLabel,
+			}
+			resp, err := daemonClient.RenameLabel(renameArgs)
+			if err != nil {
+				FatalErrorRespectJSON("failed to rename label: %v", err)
+			}
+			if !resp.Success {
+				FatalErrorRespectJSON("failed to rename label: %s", resp.Error)
+			}
+
+			// Parse response to get count
+			var result map[string]interface{}
+			if err := json.Unmarshal(resp.Data, &result); err == nil {
+				if count, ok := result["count"].(float64); ok {
+					if jsonOutput {
+						outputJSON(result)
+						return
+					}
+					fmt.Printf("\n%s Renamed label '%s' to '%s' (%d issues)\n", ui.RenderPass("✓"), oldLabel, newLabel, int(count))
+					return
+				}
+			}
+			if jsonOutput {
+				outputJSON(result)
+			}
+			return
+		}
+
+		// Direct mode: get affected issues first for count
+		affectedIssues, err = store.GetIssuesByLabel(ctx, oldLabel)
+		if err != nil {
+			FatalErrorRespectJSON("failed to get issues with label '%s': %v", oldLabel, err)
+		}
+
+		// Perform the rename
+		if err := store.RenameLabel(ctx, oldLabel, newLabel, actor); err != nil {
+			FatalErrorRespectJSON("failed to rename label: %v", err)
+		}
+
+		if !jsonOutput {
+			fmt.Printf("\n%s Renamed label '%s' to '%s' (%d issues)\n", ui.RenderPass("✓"), oldLabel, newLabel, len(affectedIssues))
+		} else {
+			outputJSON(map[string]interface{}{
+				"status":    "renamed",
+				"old_label": oldLabel,
+				"new_label": newLabel,
+				"count":     len(affectedIssues),
+			})
+		}
+
+		markDirtyAndScheduleFlush()
+	},
+}
+
 func init() {
 	// Issue ID completions
 	labelAddCmd.ValidArgsFunction = issueIDCompletion
@@ -329,5 +417,6 @@ func init() {
 	labelCmd.AddCommand(labelRemoveCmd)
 	labelCmd.AddCommand(labelListCmd)
 	labelCmd.AddCommand(labelListAllCmd)
+	labelCmd.AddCommand(labelRenameCmd)
 	rootCmd.AddCommand(labelCmd)
 }

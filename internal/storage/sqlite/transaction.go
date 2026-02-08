@@ -1053,6 +1053,85 @@ func (t *sqliteTxStorage) RemoveLabel(ctx context.Context, issueID, label, actor
 	return nil
 }
 
+// RenameLabel renames a label across all issues that have it within the transaction.
+func (t *sqliteTxStorage) RenameLabel(ctx context.Context, oldLabel, newLabel, actor string) error {
+	if oldLabel == newLabel {
+		return nil // No-op, but not an error
+	}
+
+	// First, find all issues with the old label
+	issueIDs, err := t.getIssueIDsByLabel(ctx, oldLabel)
+	if err != nil {
+		return fmt.Errorf("failed to find issues with label: %w", err)
+	}
+
+	if len(issueIDs) == 0 {
+		// No issues have this label - nothing to do
+		return nil
+	}
+
+	// Update all labels from old to new
+	result, err := t.conn.ExecContext(ctx, `
+		UPDATE OR REPLACE INTO labels SET label = ? WHERE label = ?
+	`, newLabel, oldLabel)
+	if err != nil {
+		return fmt.Errorf("failed to rename label: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to check rows affected: %w", err)
+	}
+
+	if rows == 0 {
+		return nil // No changes made
+	}
+
+	// Record events for all affected issues
+	eventComment := fmt.Sprintf("Renamed label: %s -> %s", oldLabel, newLabel)
+	for _, issueID := range issueIDs {
+		_, err = t.conn.ExecContext(ctx, `
+			INSERT INTO events (issue_id, event_type, actor, comment)
+			VALUES (?, ?, ?, ?)
+		`, issueID, types.EventLabelRenamed, actor, eventComment)
+		if err != nil {
+			return fmt.Errorf("failed to record event for %s: %w", issueID, err)
+		}
+
+		// Mark issue as dirty for incremental export
+		if err := markDirty(ctx, t.conn, issueID); err != nil {
+			return fmt.Errorf("failed to mark issue dirty: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// getIssueIDsByLabel returns all issue IDs that have a specific label using the transaction connection
+func (t *sqliteTxStorage) getIssueIDsByLabel(ctx context.Context, label string) ([]string, error) {
+	rows, err := t.conn.QueryContext(ctx, `
+		SELECT issue_id FROM labels WHERE label = ? ORDER BY issue_id
+	`, label)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query labels: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var issueIDs []string
+	for rows.Next() {
+		var issueID string
+		if err := rows.Scan(&issueID); err != nil {
+			return nil, err
+		}
+		issueIDs = append(issueIDs, issueID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return issueIDs, nil
+}
+
 // SetConfig sets a configuration value within the transaction.
 func (t *sqliteTxStorage) SetConfig(ctx context.Context, key, value string) error {
 	_, err := t.conn.ExecContext(ctx, `

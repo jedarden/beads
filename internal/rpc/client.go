@@ -380,6 +380,11 @@ func (c *Client) RemoveLabel(args *LabelRemoveArgs) (*Response, error) {
 	return c.Execute(OpLabelRemove, args)
 }
 
+// RenameLabel renames a label across all issues via the daemon
+func (c *Client) RenameLabel(args *LabelRenameArgs) (*Response, error) {
+	return c.Execute(OpLabelRename, args)
+}
+
 // ListComments retrieves comments for an issue via the daemon
 func (c *Client) ListComments(args *CommentListArgs) (*Response, error) {
 	return c.Execute(OpCommentList, args)

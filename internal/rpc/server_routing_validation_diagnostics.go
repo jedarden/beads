@@ -202,6 +202,8 @@ func (s *Server) handleRequest(req *Request) Response {
 		resp = s.handleLabelAdd(req)
 	case OpLabelRemove:
 		resp = s.handleLabelRemove(req)
+	case OpLabelRename:
+		resp = s.handleLabelRename(req)
 	case OpCommentList:
 		resp = s.handleCommentList(req)
 	case OpCommentAdd:

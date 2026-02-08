@@ -70,6 +70,7 @@ type Transaction interface {
 	AddLabel(ctx context.Context, issueID, label, actor string) error
 	RemoveLabel(ctx context.Context, issueID, label, actor string) error
 	GetLabels(ctx context.Context, issueID string) ([]string, error)
+	RenameLabel(ctx context.Context, oldLabel, newLabel, actor string) error
 
 	// Config operations (for atomic config + issue workflows)
 	SetConfig(ctx context.Context, key, value string) error
@@ -124,6 +125,7 @@ type Storage interface {
 	GetLabels(ctx context.Context, issueID string) ([]string, error)
 	GetLabelsForIssues(ctx context.Context, issueIDs []string) (map[string][]string, error)
 	GetIssuesByLabel(ctx context.Context, label string) ([]*types.Issue, error)
+	RenameLabel(ctx context.Context, oldLabel, newLabel, actor string) error
 
 	// Ready Work & Blocking
 	GetReadyWork(ctx context.Context, filter types.WorkFilter) ([]*types.Issue, error)

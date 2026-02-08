@@ -194,3 +194,89 @@ func (s *SQLiteStorage) GetIssuesByLabel(ctx context.Context, label string) ([]*
 
 	return s.scanIssues(ctx, rows)
 }
+
+// RenameLabel renames a label across all issues that have it
+func (s *SQLiteStorage) RenameLabel(ctx context.Context, oldLabel, newLabel, actor string) error {
+	if oldLabel == newLabel {
+		return nil // No-op, but not an error
+	}
+
+	return s.withTx(ctx, func(conn *sql.Conn) error {
+		// First, find all issues with the old label
+		issueIDs, err := s.getIssueIDsByLabelConn(ctx, conn, oldLabel)
+		if err != nil {
+			return fmt.Errorf("failed to find issues with label: %w", err)
+		}
+
+		if len(issueIDs) == 0 {
+			// No issues have this label - nothing to do
+			return nil
+		}
+
+		// Update all labels from old to new
+		result, err := conn.ExecContext(ctx, `
+			UPDATE OR REPLACE INTO labels SET label = ? WHERE label = ?
+		`, newLabel, oldLabel)
+		if err != nil {
+			return fmt.Errorf("failed to rename label: %w", err)
+		}
+
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("failed to check rows affected: %w", err)
+		}
+
+		if rows == 0 {
+			return nil // No changes made
+		}
+
+		// Record events for all affected issues
+		eventComment := fmt.Sprintf("Renamed label: %s -> %s", oldLabel, newLabel)
+		for _, issueID := range issueIDs {
+			_, err = conn.ExecContext(ctx, `
+				INSERT INTO events (issue_id, event_type, actor, comment)
+				VALUES (?, ?, ?, ?)
+			`, issueID, types.EventLabelRenamed, actor, eventComment)
+			if err != nil {
+				return fmt.Errorf("failed to record event for %s: %w", issueID, err)
+			}
+
+			// Mark issue as dirty for incremental export
+			_, err = conn.ExecContext(ctx, `
+				INSERT INTO dirty_issues (issue_id, marked_at)
+				VALUES (?, ?)
+				ON CONFLICT (issue_id) DO UPDATE SET marked_at = excluded.marked_at
+			`, issueID, time.Now())
+			if err != nil {
+				return fmt.Errorf("failed to mark issue dirty: %w", err)
+			}
+		}
+
+		return nil
+	})
+}
+
+// getIssueIDsByLabelConn returns all issue IDs that have a specific label (using an existing connection)
+func (s *SQLiteStorage) getIssueIDsByLabelConn(ctx context.Context, conn *sql.Conn, label string) ([]string, error) {
+	rows, err := conn.QueryContext(ctx, `
+		SELECT issue_id FROM labels WHERE label = ? ORDER BY issue_id
+	`, label)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query labels: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var issueIDs []string
+	for rows.Next() {
+		var issueID string
+		if err := rows.Scan(&issueID); err != nil {
+			return nil, wrapDBError("scan issue ID", err)
+		}
+		issueIDs = append(issueIDs, issueID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, wrapDBError("iterate issue IDs", err)
+	}
+
+	return issueIDs, nil
+}

@@ -164,6 +164,71 @@ func (s *Server) handleLabelRemove(req *Request) Response {
 	}, func() string { return labelArgs.ID }, nil)
 }
 
+func (s *Server) handleLabelRename(req *Request) Response {
+	var labelArgs LabelRenameArgs
+	if err := json.Unmarshal(req.Args, &labelArgs); err != nil {
+		return Response{
+			Success: false,
+			Error:   fmt.Sprintf("invalid label rename args: %v", err),
+		}
+	}
+
+	store := s.storage
+	if store == nil {
+		return Response{
+			Success: false,
+			Error:   "storage not available (global daemon deprecated - use local daemon instead with 'bd daemon' in your project)",
+		}
+	}
+
+	// Validate labels
+	if labelArgs.OldLabel == "" {
+		return Response{
+			Success: false,
+			Error:   "old_label is required",
+		}
+	}
+	if labelArgs.NewLabel == "" {
+		return Response{
+			Success: false,
+			Error:   "new_label is required",
+		}
+	}
+
+	ctx, cancel := s.reqCtx(req)
+	defer cancel()
+
+	// Get affected issues before rename for mutation events
+	issues, err := store.GetIssuesByLabel(ctx, labelArgs.OldLabel)
+	if err != nil {
+		return Response{
+			Success: false,
+			Error:   fmt.Sprintf("failed to get issues with label: %v", err),
+		}
+	}
+
+	if err := store.RenameLabel(ctx, labelArgs.OldLabel, labelArgs.NewLabel, s.reqActor(req)); err != nil {
+		return Response{
+			Success: false,
+			Error:   fmt.Sprintf("failed to rename label: %v", err),
+		}
+	}
+
+	// Emit mutation events for all affected issues
+	for _, issue := range issues {
+		s.emitMutation(MutationUpdate, issue.ID, issue.Title, issue.Assignee)
+	}
+
+	result := map[string]interface{}{
+		"status":    "renamed",
+		"old_label": labelArgs.OldLabel,
+		"new_label": labelArgs.NewLabel,
+		"count":     len(issues),
+	}
+	data, _ := json.Marshal(result)
+	return Response{Success: true, Data: data}
+}
+
 func (s *Server) handleCommentList(req *Request) Response {
 	var commentArgs CommentListArgs
 	if err := json.Unmarshal(req.Args, &commentArgs); err != nil {

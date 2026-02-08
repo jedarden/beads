@@ -903,6 +903,7 @@ const (
 	EventDependencyRemoved EventType = "dependency_removed"
 	EventLabelAdded        EventType = "label_added"
 	EventLabelRemoved      EventType = "label_removed"
+	EventLabelRenamed      EventType = "label_renamed"
 	EventCompacted         EventType = "compacted"
 )
 

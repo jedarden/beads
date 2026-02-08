@@ -1135,6 +1135,41 @@ func (m *MemoryStorage) GetIssuesByLabel(ctx context.Context, label string) ([]*
 	return results, nil
 }
 
+// RenameLabel renames a label across all issues that have it
+func (m *MemoryStorage) RenameLabel(ctx context.Context, oldLabel, newLabel, actor string) error {
+	if oldLabel == newLabel {
+		return nil // No-op, but not an error
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Find and update all issues with the old label
+	for issueID, labels := range m.labels {
+		found := false
+		newLabels := make([]string, 0, len(labels))
+		for _, l := range labels {
+			if l == oldLabel {
+				newLabels = append(newLabels, newLabel)
+				found = true
+			} else {
+				newLabels = append(newLabels, l)
+			}
+		}
+		if found {
+			m.labels[issueID] = newLabels
+			// Update the issue's Labels field too
+			if issue, exists := m.issues[issueID]; exists {
+				issueCopy := *issue
+				issueCopy.Labels = newLabels
+				m.issues[issueID] = &issueCopy
+			}
+		}
+	}
+
+	return nil
+}
+
 // GetReadyWork returns issues that are ready to work on (no open blockers)
 func (m *MemoryStorage) GetReadyWork(ctx context.Context, filter types.WorkFilter) ([]*types.Issue, error) {
 	m.mu.RLock()

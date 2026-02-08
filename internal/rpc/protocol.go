@@ -23,12 +23,13 @@ const (
 	OpBlocked     = "blocked"
 	OpStale       = "stale"
 	OpStats       = "stats"
-	OpDepAdd      = "dep_add"
-	OpDepRemove   = "dep_remove"
-	OpDepTree     = "dep_tree"
-	OpLabelAdd    = "label_add"
-	OpLabelRemove = "label_remove"
-	OpCommentList = "comment_list"
+	OpDepAdd       = "dep_add"
+	OpDepRemove    = "dep_remove"
+	OpDepTree      = "dep_tree"
+	OpLabelAdd     = "label_add"
+	OpLabelRemove  = "label_remove"
+	OpLabelRename  = "label_rename"
+	OpCommentList  = "comment_list"
 	OpCommentAdd  = "comment_add"
 	OpBatch       = "batch"
 	OpResolveID   = "resolve_id"
@@ -379,6 +380,12 @@ type LabelAddArgs struct {
 type LabelRemoveArgs struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
+}
+
+// LabelRenameArgs represents arguments for renaming a label
+type LabelRenameArgs struct {
+	OldLabel string `json:"old_label"`
+	NewLabel string `json:"new_label"`
 }
 
 // CommentListArgs represents arguments for listing comments on an issue
